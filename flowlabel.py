@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 # 
 # flowlabel BPF programs to analyse flow label 
 #           statistics in IPv6 header. Conceived
@@ -11,13 +11,14 @@
 from bcc import BPF
 from pyroute2 import IPRoute
 from pyroute2.netlink.exceptions import NetlinkError
+import subprocess
 
 # TODO: include parameters from the command line
 dev="eth2"
-#bpfprog="tc_fl_kern.c"
-bpfprog="test.c"
+bpfprog="tc_fl_kern.o"
+#bpfprog="test.c"
 bpfsec="tc_flowlabel_stats"
-direction="in" # "in" or "out"
+direction="ingress" # "ingress" or "egress"
 
 print("Hello world!")
 
@@ -35,11 +36,27 @@ int hello(struct __sk_buff *skb) {
   return 1;
 }
 """
-
-prog = BPF(src_file=bpfprog, cflags=["-I/usr/include/x86_64-linux-gnu/"], debug=0)
+# This Section to compile and load the BPF program. BCC has its own BPF class for all
+# of these operations, but they use their internal compilation structure and it is not
+# straightforward to use the with libbpf. Simply putting libbpf in the kernel tree creates
+# a lot of name collisions.
+#prog = BPF(src_file=bpfprog, cflags=["-I/usr/include/x86_64-linux-gnu/ -I/usr/include/"], debug=0)
 #prog = BPF(text=text,debug=0)
+try:
+    subprocess.run(["make", bpfprog], check=True);
+except subprocess.CalledProcessError:
+    print("Unable to compile bpf program!")
+else:
+    print("Compilation successfull!")
 
 #fn = b.load_func("tc_flowlabel_stats", BPF.SCHED_CLS)
+
+try:
+    subprocess.run(["tc","filter","add","dev",dev,direction,"bpf","da","obj",bpfprog,"sec",bpfsec],check=True)
+except subprocess.CalledProcessError:
+    print("Unable to load/attach bpf program!")
+else:
+    print("Bpf program successfully loaded!")
 
 
 try:
