@@ -11,6 +11,8 @@
 from bcc import BPF
 from pyroute2 import IPRoute
 from pyroute2.netlink.exceptions import NetlinkError
+import time
+import sys
 import subprocess
 
 # TODO: include parameters from the command line
@@ -18,6 +20,7 @@ dev="eth2"
 bpfprog="tc_fl_kern.c"
 bpfsec="tc_flowlabel_stats"
 direction="egress" # "ingress" or "egress"
+output_interval=5
 
 print("Hello world!")
 
@@ -69,8 +72,22 @@ else:
 
 hist = prog.get_table('fl_stats')
 
-
-
+try:
+    while True:
+        time.sleep(output_interval)
+        hist_values = hist.items()
+        num = len(hist_values)
+        print("Num: %d", num)
+        print("Flow label\tNo packets\tTotal\tInterval\n")
+        for i in range(0,num):
+            print(len(hist_values[i])) # This is a num X 2 bi-dimensional array
+            print(type(hist_values[i])) # <class 'tuple'>
+            print((hist_values[i][1]).value)
+            #print((str(hist_values[i][0:3])))
+            #print(int(str(hist_values[i][1])))
+except KeyboardInterrupt:
+    sys.stdout.close()
+    pass
 
 #subprocess.run("./tc_fl_user")
 
