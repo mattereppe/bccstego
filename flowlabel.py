@@ -22,8 +22,6 @@ bpfsec="tc_flowlabel_stats"
 direction="egress" # "ingress" or "egress"
 output_interval=5
 
-print("Hello world!")
-
 ipr = IPRoute()
 
 idx = ipr.link_lookup(ifname=dev)[0]
@@ -73,18 +71,23 @@ else:
 hist = prog.get_table('fl_stats')
 
 try:
+    prev_values = hist.items() # Read initial values, but do not print them
+    prev = time.time()
     while True:
-        time.sleep(output_interval)
+        time.sleep(output_interval) # Wait for next values to be available
         hist_values = hist.items()
+        now = time.time()
+        # -- TODO: Put the following in a function 
         num = len(hist_values)
-        print("Num: %d", num)
         print("Flow label\tNo packets\tTotal\tInterval\n")
         for i in range(0,num):
-            print(len(hist_values[i])) # This is a num X 2 bi-dimensional array
-            print(type(hist_values[i])) # <class 'tuple'>
-            print((hist_values[i][1]).value)
-            #print((str(hist_values[i][0:3])))
-            #print(int(str(hist_values[i][1])))
+            #print(len(hist_values[i])) # This is a num X 2 bi-dimensional array
+            #print(type(hist_values[i])) # <class 'tuple'>
+            period = now - prev
+            packets = int((hist_values[i][1]).value) - int((prev_values[i][1]).value)
+            print("{0:05x}".format(i),"\t\t", packets, "\t\t", (hist_values[i][1]).value, "\t[",period, "s]")
+        # -- End function
+        print
 except KeyboardInterrupt:
     sys.stdout.close()
     pass
