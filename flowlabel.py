@@ -14,13 +14,33 @@ from pyroute2.netlink.exceptions import NetlinkError
 import time
 import sys
 import subprocess
+import argparse
+import pathlib
 
-# TODO: include parameters from the command line
-dev="eth2"
-bpfprog="tc_fl_kern.c"
-bpfsec="tc_flowlabel_stats"
-direction="egress" # "ingress" or "egress"
-output_interval=5
+# Parse parameters from the command line
+parser = argparse.ArgumentParser(description='Run bpf inspectors on IPv6 header.',
+		epilog='Only the flow label field is support so far.')
+parser.add_argument('-p','--program', type=pathlib.Path,
+		help='Name of the bpf program to use',metavar='PROG', required=True)
+parser.add_argument('-d','--dev', 
+		help='Network interface to attach the program to', required=True)
+parser.add_argument('-i','--interval', default=5, type=int, 
+		help='Polling interval of the bpf program', metavar='INT')
+parser.add_argument('-w','--write',default='stdio', type=pathlib.Path,
+		help='Output of the program',metavar='FILE')
+parser.add_argument('-s','--section', default="ProgSec",
+		help='Section of the program to load',metavar='SEC')
+parser.add_argument('--dir', help='Direction to apply the filter', default='egress', 
+		choices=['ingress','egress'])
+param = parser.parse_args()
+
+dev=param.dev
+bpfprog=str(param.program)
+#bpfprog='tc_kern.c'
+bpfsec=param.section
+direction=param.dir
+output_interval=param.interval
+output_file=param.write
 
 ipr = IPRoute()
 
