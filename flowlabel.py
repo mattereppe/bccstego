@@ -26,7 +26,7 @@ parser.add_argument('-d','--dev',
 		help='Network interface to attach the program to', required=True)
 parser.add_argument('-i','--interval', default=5, type=int, 
 		help='Polling interval of the bpf program', metavar='INT')
-parser.add_argument('-w','--write',default='stdio', type=pathlib.Path,
+parser.add_argument('-w','--write',default='stdout', 
 		help='Output of the program',metavar='FILE')
 parser.add_argument('-s','--section', default="ProgSec",
 		help='Section of the program to load',metavar='SEC')
@@ -40,7 +40,7 @@ bpfprog=str(param.program)
 bpfsec=param.section
 direction=param.dir
 output_interval=param.interval
-output_file=param.write
+output_file_name=param.write
 
 ipr = IPRoute()
 
@@ -93,6 +93,10 @@ hist = prog.get_table('fl_stats')
 try:
     prev_values = hist.items() # Read initial values, but do not print them
     prev = time.time()
+    if output_file_name != "stdout":
+        orig_stdout = sys.stdout
+        output_file = open(output_file_name,'w')
+        sys.stdout = output_file
     while True:
         time.sleep(output_interval) # Wait for next values to be available
         hist_values = hist.items()
@@ -111,6 +115,14 @@ try:
 except KeyboardInterrupt:
     sys.stdout.close()
     pass
+finally:
+    try:
+        sys.stdout = orig_stdout
+        output_file.close()
+    except NameError:
+        # Do nothing
+        no_op = 0
+
 
 #subprocess.run("./tc_fl_user")
 
