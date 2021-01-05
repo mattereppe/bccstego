@@ -37,7 +37,7 @@
 {}
 #endif
 
-#define BINBASE 10 
+#define BINBASE 8 
 #define NBINS 0x1<<BINBASE
 
 

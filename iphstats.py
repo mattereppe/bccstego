@@ -16,6 +16,7 @@ import sys
 import subprocess
 import argparse
 import pathlib
+import re
 
 # Parse parameters from the command line
 parser = argparse.ArgumentParser(description='Run bpf inspectors on IPv6 header.',
@@ -24,6 +25,8 @@ parser.add_argument('-p','--program', type=pathlib.Path,
 		help='Name of the bpf program to use',metavar='PROG', required=True)
 parser.add_argument('-d','--dev', 
 		help='Network interface to attach the program to', required=True)
+parser.add_argument('-b','--binbase', default=8, type=int, 
+		help='Exponent for the number of bins (nbins is computed as 2^BINBASE)', metavar='BINBASE')
 parser.add_argument('-i','--interval', default=5, type=int, 
 		help='Polling interval of the bpf program', metavar='INT')
 parser.add_argument('-w','--write',default='stdout', 
@@ -39,6 +42,7 @@ bpfprog=str(param.program)
 #bpfprog='tc_kern.c'
 bpfsec=param.section
 direction=param.dir
+binbase=str(param.binbase)
 output_interval=param.interval
 output_file_name=param.write
 
@@ -62,6 +66,16 @@ except NetlinkError as err:
 #"""
 #prog = BPF(text=text,debug=0)
 #fn = prog.load_func("hello", BPF.SCHED_CLS)
+
+# Set the required number of bins in the source file
+with open(bpfprog,'r') as progfile:
+    src = progfile.read()
+
+src = re.sub(r'(#define BINBASE) [0-9]*',r'\1 ' + binbase, src)
+print(src)
+
+with open(bpfprog,'w') as file:
+    file.write(src)
 
 prog = BPF(src_file=bpfprog, cflags=["-I/usr/include/"], debug=0)
 fn = prog.load_func("flow_label_stats", BPF.SCHED_CLS)
