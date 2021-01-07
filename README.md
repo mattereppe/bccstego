@@ -36,6 +36,10 @@ optional arguments:
 Beware to select the correct bin number!
 ```
 
+## Dependencies
+
+This software makes use of the <A href="https://github.com/iovisor/bcc">BPF Compiler Collection (BCC)</A>. On Debian, the following packages are required: <code>bpfcc-tools</code>, <code>libbpfcc</code>, <code>python3-bpfcc</code>.
+
 ## Build process
 
 The program is a single python script which embeds all the necessary code to assemble, compile and install the BPF filter. Anyway, additional modifications might be necessary to include additional use cases or to modify the output. For instance, it should be extended to work with other protocols: IPv6, TCP, UDP.
