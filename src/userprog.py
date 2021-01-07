@@ -55,7 +55,6 @@ binbase=param.binbase
 output_interval=param.interval
 output_file_name=param.write
 
-print("REMINDER: insert a check on BINBASE value for the different programs!!!")
 if prog == "fl":
     ipv6fieldlength=20
 else:
@@ -65,8 +64,6 @@ else:
 # than the space of field values
 if binbase >= ipv6fieldlength:
     raise InvalidParameterError("Number of bins too big!")
-
-print("prog: ", prog)
 
 ipr = IPRoute()
 
