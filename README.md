@@ -137,6 +137,7 @@ $  ping6 fe80::f816:3eff:fe36:da7d
 ## References
 
 [1] L. Caviglione, W. Mazurczyk, M. Repetto, A. Schaffhauser, M. Zuppelli. Kernel-level Tracing for Detecting Stegomalware and Covert Channels in Linux Environments, <i>Computer Networks</i>, Under revision.
+
 [2] ...
 
 ## Acknoledgements
