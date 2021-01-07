@@ -41,8 +41,8 @@ parser.add_argument('-b','--binbase', default=4, type=int,
 parser.add_argument('-i','--interval', default=5, type=int, 
 		help='Polling interval of the bpf program', metavar='INT')
 parser.add_argument('-w','--write',default='stdout', 
-		help='Output of the program',metavar='FILE')
-parser.add_argument('--dir', help='Direction to apply the filter', default='egress', 
+		help='Output of the program (default: stdout)',metavar='FILE')
+parser.add_argument('--dir', help='Direction to apply the filter (default: egress)', default='egress', 
 		choices=['ingress','egress'])
 parser.add_argument('-p','--print', help='Print the built bpf program', action='store_true')
 param = parser.parse_args()
