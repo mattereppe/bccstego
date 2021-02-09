@@ -1,4 +1,4 @@
-# bpfstego
+# bccstego
 
 This tool inspects IPv6 packets and creates an histogram of values used in selectable header fields (currently supported fields: flow label, traffic class, hop limit). The histogram is made of a given number of bins, and all possible field values are equally divided into the available bins, in a consecutive way. Practically speaking, the field values grouped into the same bin share the same prefix, which is also used as the <i>key</i> in the output (the number of shared bits depends on the number of bins). 
 The number of bins and the sampling interval can be both set on the command line; however, the former must be lower than the number of possible values for the specific field.
