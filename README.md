@@ -38,7 +38,7 @@ Beware to select the correct bin number!
 
 ## Dependencies
 
-This software makes use of the <A href="https://github.com/iovisor/bcc">BPF Compiler Collection (BCC)</A>. On Debian, the following packages are required: <code>bpfcc-tools</code>, <code>libbpfcc</code>, <code>python3-bpfcc</code>.
+This software makes use of the <A href="https://github.com/iovisor/bcc">BPF Compiler Collection (BCC)</A>. On Debian, the following packages are required: <code>bpfcc-tools</code>, <code>libbpfcc</code>, <code>python3-bpfcc</code>, version > 0.17.
 
 ## Build process
 
