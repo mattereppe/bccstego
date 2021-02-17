@@ -62,7 +62,7 @@ else:
 
 # Check that the number of required bins is no larger
 # than the space of field values
-if binbase >= ipv6fieldlength:
+if binbase > ipv6fieldlength:
     raise InvalidParameterError("Number of bins too big!")
 
 ipr = IPRoute()
