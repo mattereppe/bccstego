@@ -144,6 +144,6 @@ $  ping6 fe80::f816:3eff:fe36:da7d
 
 [2] The IPv6CC suite. Soon available...
 
-## Acknoledgements
+## Acknowledgements
 
-This work has received funding from the European Commission under Grant Agreement no. 786922 (ASTRID) and no. 833456 (GUARD).
+This work has received funding from the European Commission under Grant Agreement no. 786922 (ASTRID).
