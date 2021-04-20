@@ -4,7 +4,7 @@ This tool inspects IPv6 packets and creates an histogram of values used in selec
 The number of bins and the sampling interval can be both set on the command line; however, the former must be lower than the number of possible values for the specific field.
 Beware that the larger is the number of bins, the higher will be internal memory usage; of course, also the delay to retrieve the whole histogram will increase. Currently, it seems that no errors are reported up to 2^18 bins.
 
-The tool can be used to check how the kernel generates these values, and to detect covert channels hidden in the IPv6 header [1]. A collection of tools for creating covert channels in different header fields of IPv6 can be retrieved from [2].
+The tool can be used to check how the kernel generates these values, and to detect covert channels hidden in the IPv6 header [1][2]. A collection of tools for creating covert channels in different header fields of IPv6 can be retrieved from [3].
 
 ## Usage
 
@@ -142,8 +142,10 @@ $  ping6 fe80::f816:3eff:fe36:da7d
 
 [1] L. Caviglione, W. Mazurczyk, M. Repetto, A. Schaffhauser, M. Zuppelli. Kernel-level Tracing for Detecting Stegomalware and Covert Channels in Linux Environments, <i>Computer Networks</i>, Volume 191, May 2021. DOI: <A href="https://doi.org/10.1016/j.comnet.2021.108010">10.1016/j.comnet.2021.108010</A>.
 
-[2] The IPv6CC suite. Soon available...
+[2] L. Caviglione, M. Zuppelli, W. Mazurczyk, A. Shaffhauser, M. Repetto. Code Augmentation for Detecting Covert Channels Targeting the IPv6 Flow Label. 3rd International Workshop on Cyber-Security Threats, Trust and Privacy Management in Software-defined and Virtualized Infrastructures (SecSoft), July 2nd, 2021, Tokyo, Japan. <i>To appear</i>.
+
+[3] The IPv6CC suite. Soon available...
 
 ## Acknowledgements
 
-This work has received funding from the European Commission under Grant Agreement no. 786922 (ASTRID), Grant Agreement no. 833456 (GUARD) and Grant Agreement no. 833042 (SIMARGL).
+This work has received funding from the European Commission under Grant Agreement no. 786922 (<A href="https://www.astrid-project.eu/">ASTRID</A>), Grant Agreement no. 833456 (<A href="https://guard-project.eu/">GUARD</A>) and Grant Agreement no. 833042 (<A href="https://simargl.eu/">SIMARGL</A>).
