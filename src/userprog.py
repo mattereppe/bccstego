@@ -32,7 +32,7 @@ class InvalidParameterError(Exception):
 parser = argparse.ArgumentParser(description='Run bpf inspectors on IPv6 header.',
 		epilog='Beware to select the correct bin number!')
 parser.add_argument('-t','--type', choices=['fl','tc','hl','nh','pl','tos','ttl','ihl', 'id','fo'],
-        help='Type of statistics to collect: fl (flow label), tc (traffic class), hl (hop limit), nh (next header), pl (payload length), tos (type of service), ttl (time-to-live), ihl (internet header length), id (identification), fo (fragment offset)',
+        help='Type of statistics to collect. Allowed values for IPv6: fl (flow label), tc (traffic class), hl (hop limit), nh (next header), pl (payload length). Allowed valued for IPv4: tos (type of service), ttl (time-to-live), ihl (internet header length), id (identification), fo (fragment offset)',
         metavar='PROG', required=True)
 parser.add_argument('-d','--dev', 
 		help='Network interface to attach the program to', required=True)
