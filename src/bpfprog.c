@@ -255,7 +255,7 @@ int  ip_stats(struct __sk_buff *skb)
 			
 
 	/* Collect the required statistics. */
-	__u32 key = ipfield >> (IPV6FIELDLENGTH-BINBASE);
+	__u32 key = ipfield >> (IPFIELDLENGTH-BINBASE);
 	__u32 *counter = 
 #ifndef __BCC__
 		bpf_map_lookup_elem(&ip_stats_map, &key);

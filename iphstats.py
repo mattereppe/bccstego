@@ -352,7 +352,7 @@ int  ip_stats(struct __sk_buff *skb)
 			
 
 	/* Collect the required statistics. */
-	__u32 key = ipfield >> (IPV6FIELDLENGTH-BINBASE);
+	__u32 key = ipfield >> (IPFIELDLENGTH-BINBASE);
 	__u32 *counter = 
 #ifndef __BCC__
 		bpf_map_lookup_elem(&ip_stats_map, &key);
@@ -383,7 +383,7 @@ char _license[] SEC("license") = "GPL";
 # Set the required number of bins in the source file
 bpfprog = re.sub(r'SETBINBASE',r'#define BINBASE ' + str(binbase), bpfprog)
 # Set the length of field to be monitored
-bpfprog = re.sub(r'IPV6FIELDLENGTH',str(ipfieldlength), bpfprog)
+bpfprog = re.sub(r'IPFIELDLENGTH',str(ipfieldlength), bpfprog)
 # Set the specific code to read the required field
 if prog == 'fl':
     src = """

@@ -100,7 +100,7 @@ BPFPROG_SRC_CODE
 # Set the required number of bins in the source file
 bpfprog = re.sub(r'SETBINBASE',r'#define BINBASE ' + str(binbase), bpfprog)
 # Set the length of field to be monitored
-bpfprog = re.sub(r'IPV6FIELDLENGTH',str(ipfieldlength), bpfprog)
+bpfprog = re.sub(r'IPFIELDLENGTH',str(ipfieldlength), bpfprog)
 # Set the specific code to read the required field
 if prog == 'fl':
     src = """
