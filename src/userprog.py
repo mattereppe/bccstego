@@ -31,8 +31,8 @@ class InvalidParameterError(Exception):
 # Parse parameters from the command line
 parser = argparse.ArgumentParser(description='Run bpf inspectors on IPv6 header.',
 		epilog='Beware to select the correct bin number!')
-parser.add_argument('-t','--type', choices=['fl','tc','hl','nh','pl'],
-        help='Type of statistics to collect: fl (flow label), tc (traffic class), hl (hop limit), nh (next header), pl (payload length)',
+parser.add_argument('-t','--type', choices=['fl','tc','hl','nh','pl','tos','ttl','ihl', 'id','fo'],
+        help='Type of statistics to collect: fl (flow label), tc (traffic class), hl (hop limit), nh (next header), pl (payload length), tos (type of service), ttl (time-to-live), ihl (internet header length), id (identification), fo (fragment offset)',
         metavar='PROG', required=True)
 parser.add_argument('-d','--dev', 
 		help='Network interface to attach the program to', required=True)
@@ -55,10 +55,16 @@ binbase=param.binbase
 output_interval=param.interval
 output_file_name=param.write
 
+ipv6_fields = {"fl", "tc", "hl", "nh", "pl"}
+ipv4_fields = {"tos", "ttl", "ihl", "id", "fo"}
 if prog == "fl":
     ipv6fieldlength=20
-elif prog == "pl":
+elif prog == "pl" or prog == "id":
     ipv6fieldlength=16
+elif prog == "ihl":
+    ipv6fieldlength=4
+elif prog == "fo":
+    ipv6fieldlength=13
 else:
     ipv6fieldlength=8
 
@@ -127,11 +133,38 @@ elif prog == 'pl':
     src = """
             ipv6field = ntohs(iph6->payload_len);
     """
+elif prog == 'tos':
+    src = """
+        ipv6field = iph4->tos;
+    """
+elif prog == 'ttl':
+    src = """
+        ipv6field = iph4->ttl;
+    """
+elif prog == 'ihl':
+    src = """
+        ipv6field = iph4->ihl;
+    """
+elif prog == 'id':
+    src = """
+        ipv6field = ntohs(iph4->id);
+    """
+elif prog == 'fo':
+    src = """
+        ipv6field = iph4->ntohs(iph4->frag_off) & 0x1fff;
+    """
 else:
     raise ValueErr("Invalid field name!")
 
 
-bpfprog = re.sub(r'UPDATE_STATISTICS',src, bpfprog)
+if prog in ipv6_fields:
+    bpfprog = re.sub(r'UPDATE_STATISTICS_V6',src, bpfprog)
+    bpfprog = re.sub(r'UPDATE_STATISTICS_V4',"", bpfprog)
+elif prog in ipv4_fields:
+    bpfprog = re.sub(r'UPDATE_STATISTICS_V6',"", bpfprog)
+    bpfprog = re.sub(r'UPDATE_STATISTICS_V4',src, bpfprog)
+else:
+    raise ValueErr("Unmanaged field!!!")
 
 if param.print:
     print(bpfprog)

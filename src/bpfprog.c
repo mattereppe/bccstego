@@ -136,9 +136,34 @@ static __always_inline int parse_ethhdr(struct hdr_cursor *nh,
         }
 
         nh->pos = vlh;
-        return h_proto; /* network-byte-order */
+        return bpf_ntohs(h_proto); /* host-byte-order */
 
 
+}
+
+static __always_inline int parse_iphdr(struct hdr_cursor *nh,
+                   void *data_end,
+                   struct iphdr **iphdr)
+{
+   struct iphdr *iph = nh->pos;
+   int hdrsize;
+
+   if ( (void *)(iph + 1) > data_end)
+      return -1;
+
+   hdrsize = iph->ihl * 4;
+   // Sanity check packet field is valid/
+   if(hdrsize < sizeof(iph))
+      return -1;
+
+   // Variable-length IPv4 header, need to use byte-based arithmetic 
+   if (nh->pos + hdrsize > data_end)
+      return -1;
+
+   nh->pos += hdrsize;
+   *iphdr = iph;
+
+   return iph->protocol;
 }
 
 static __always_inline int parse_ip6hdr(struct hdr_cursor *nh,
@@ -175,12 +200,14 @@ int  ipv6_stats(struct __sk_buff *skb)
 	__u32 ipv6field = 0;
 	__u32 len = 0;
 	__u32 init_value = 1;
+	unsigned int vers = 0;
 	int eth_proto, ip_proto = 0;
 	/* int eth_proto, ip_proto, icmp_type = 0; */
 /*	struct flowid flow = { 0 }; */
 	struct hdr_cursor nh;
 	struct ethhdr *eth;
 	struct ipv6hdr* iph6;
+	struct iphdr *iph4;
 	__u64 ts, te;
 
 	ts = bpf_ktime_get_ns();	
@@ -194,21 +221,38 @@ int  ipv6_stats(struct __sk_buff *skb)
 		bpf_trace_printk("Unknown ethernet protocol/Too many nested VLANs.");
 		return TC_ACT_OK; /* TODO: XDP_ABORT? */
 	}
-	if ( eth_proto != bpf_htons(ETH_P_IPV6) )
-	{
-		return TC_ACT_OK;
-	}
 
 	/* Parse IP header and verify protocol number. */
-	if( (ip_proto = parse_ip6hdr(&nh, data_end, &iph6)) < 0 ) {
+	switch (eth_proto) {
+		case ETH_P_IP:
+			ip_proto = parse_iphdr(&nh, data_end, &iph4);
+			vers = 4;
+			break;
+		case ETH_P_IPV6:
+			ip_proto = parse_ip6hdr(&nh, data_end, &iph6);
+			vers = 6;
+			break;
+		default:
+			return TC_ACT_OK;
+	}
+
+	if( ip_proto < 0 ) {
 		return TC_ACT_OK;
 	}	
 
-	/* Check flow label
+	/* Check statistics
 	 */
-	if( (void*) iph6 + sizeof(struct ipv6hdr) < data_end) {
-		UPDATE_STATISTICS
+	if ( vers == 6 ) {
+		if( (void*) iph6 + sizeof(struct ipv6hdr) < data_end) {
+			UPDATE_STATISTICS_V6
+		}
 	}
+	else {
+		if ( (void*) iph4 + sizeof(struct iphdr) < data_end) {
+			UPDATE_STATISTICS_V4
+		}
+	}
+			
 
 	/* Collect the required statistics. */
 	__u32 key = ipv6field >> (IPV6FIELDLENGTH-BINBASE);
