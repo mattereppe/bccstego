@@ -1,6 +1,9 @@
 # bccstego
 
-This tool inspects IP packets and creates an histogram of seen values used for a specific header field. The list of supported fields includes those that can be likely used for creating covert channels, and currently includes both IPv6 (flow label, traffic class, hop limit) and IPv4 (type of service/differentiated service code pointer, identification, time-to-live, fragment offset, internet header length). The histogram is made of a given number of bins, and all possible field values are equally divided into the available bins, in a consecutive way. Practically speaking, the field values grouped into the same bin share the same prefix, which is also used as the <i>key</i> in the output (the number of shared bits depends on the number of bins). 
+This tool inspects IP packets and creates an histogram of seen values used for a specific header field. Version 0.1 only supported IPv6, whereas version 0.2 introduces support for IPv4. According, the name of the main executable changed from <code>iph6stats.py</code> to <code>iphstats.py</code>. The list of supported fields includes those that can be likely used for creating covert channels, and currently includes both IPv6 (flow label, traffic class, hop limit) and IPv4 (type of service/differentiated service code pointer, identification, time-to-live, fragment offset, internet header length). 
+
+
+The histogram is made of a given number of bins, and all possible field values are equally divided into the available bins, in a consecutive way. Practically speaking, the field values grouped into the same bin share the same prefix, which is also used as the <i>key</i> in the output (the number of shared bits depends on the number of bins). 
 The number of bins and the sampling interval can be both set on the command line; however, the former must be lower than the number of possible values for the specific field.
 Beware that the larger is the number of bins, the higher will be internal memory usage; of course, also the delay to retrieve the whole histogram will increase. Currently, it seems that no errors are reported up to 2^20 bins (tested on Debian virtual machine with 2GB vRAM).
 
@@ -42,7 +45,7 @@ Beware to select the correct bin number!
 
 ## Dependencies
 
-This software makes use of the <A href="https://github.com/iovisor/bcc">BPF Compiler Collection (BCC)</A>. On Debian, the following packages are required: <code>bpfcc-tools</code>, <code>libbpfcc</code>, <code>python3-bpfcc</code>, version > 0.18.
+This software makes use of the <A href="https://github.com/iovisor/bcc">BPF Compiler Collection (BCC)</A>. On Debian, the following packages are required: <code>bpfcc-tools</code>, <code>libbpfcc</code>, <code>python3-bpfcc</code>, version >= 0.18.
 
 ## Build process
 
