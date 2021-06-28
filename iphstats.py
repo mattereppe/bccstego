@@ -31,8 +31,8 @@ class InvalidParameterError(Exception):
 # Parse parameters from the command line
 parser = argparse.ArgumentParser(description='Run bpf inspectors on IPv6 header.',
 		epilog='Beware to select the correct bin number!')
-parser.add_argument('-t','--type', choices=['fl','tc','hl'],
-        help='Type of statistics to collect: fl (flow label), tc (traffic class), hl (hop limit)',
+parser.add_argument('-t','--type', choices=['fl','tc','hl','nh','pl','tos','ttl','ihl', 'id','fo'],
+        help='Type of statistics to collect: fl (flow label), tc (traffic class), hl (hop limit), nh (next header), pl (payload length), tos (type of service), ttl (time-to-live), ihl (internet header length), id (identification), fo (fragment offset)',
         metavar='PROG', required=True)
 parser.add_argument('-d','--dev', 
 		help='Network interface to attach the program to', required=True)
@@ -55,8 +55,16 @@ binbase=param.binbase
 output_interval=param.interval
 output_file_name=param.write
 
+ipv6_fields = {"fl", "tc", "hl", "nh", "pl"}
+ipv4_fields = {"tos", "ttl", "ihl", "id", "fo"}
 if prog == "fl":
     ipv6fieldlength=20
+elif prog == "pl" or prog == "id":
+    ipv6fieldlength=16
+elif prog == "ihl":
+    ipv6fieldlength=4
+elif prog == "fo":
+    ipv6fieldlength=13
 else:
     ipv6fieldlength=8
 
@@ -225,9 +233,34 @@ static __always_inline int parse_ethhdr(struct hdr_cursor *nh,
         }
 
         nh->pos = vlh;
-        return h_proto; /* network-byte-order */
+        return bpf_ntohs(h_proto); /* host-byte-order */
 
 
+}
+
+static __always_inline int parse_iphdr(struct hdr_cursor *nh,
+                   void *data_end,
+                   struct iphdr **iphdr)
+{
+   struct iphdr *iph = nh->pos;
+   int hdrsize;
+
+   if ( (void *)(iph + 1) > data_end)
+      return -1;
+
+   hdrsize = iph->ihl * 4;
+   // Sanity check packet field is valid/
+   if(hdrsize < sizeof(iph))
+      return -1;
+
+   // Variable-length IPv4 header, need to use byte-based arithmetic 
+   if (nh->pos + hdrsize > data_end)
+      return -1;
+
+   nh->pos += hdrsize;
+   *iphdr = iph;
+
+   return iph->protocol;
 }
 
 static __always_inline int parse_ip6hdr(struct hdr_cursor *nh,
@@ -264,12 +297,14 @@ int  ipv6_stats(struct __sk_buff *skb)
 	__u32 ipv6field = 0;
 	__u32 len = 0;
 	__u32 init_value = 1;
+	unsigned int vers = 0;
 	int eth_proto, ip_proto = 0;
 	/* int eth_proto, ip_proto, icmp_type = 0; */
 /*	struct flowid flow = { 0 }; */
 	struct hdr_cursor nh;
 	struct ethhdr *eth;
 	struct ipv6hdr* iph6;
+	struct iphdr *iph4;
 	__u64 ts, te;
 
 	ts = bpf_ktime_get_ns();	
@@ -283,21 +318,38 @@ int  ipv6_stats(struct __sk_buff *skb)
 		bpf_trace_printk("Unknown ethernet protocol/Too many nested VLANs.");
 		return TC_ACT_OK; /* TODO: XDP_ABORT? */
 	}
-	if ( eth_proto != bpf_htons(ETH_P_IPV6) )
-	{
-		return TC_ACT_OK;
-	}
 
 	/* Parse IP header and verify protocol number. */
-	if( (ip_proto = parse_ip6hdr(&nh, data_end, &iph6)) < 0 ) {
+	switch (eth_proto) {
+		case ETH_P_IP:
+			ip_proto = parse_iphdr(&nh, data_end, &iph4);
+			vers = 4;
+			break;
+		case ETH_P_IPV6:
+			ip_proto = parse_ip6hdr(&nh, data_end, &iph6);
+			vers = 6;
+			break;
+		default:
+			return TC_ACT_OK;
+	}
+
+	if( ip_proto < 0 ) {
 		return TC_ACT_OK;
 	}	
 
-	/* Check flow label
+	/* Check statistics
 	 */
-	if( (void*) iph6 + sizeof(struct ipv6hdr) < data_end) {
-		UPDATE_STATISTICS
+	if ( vers == 6 ) {
+		if( (void*) iph6 + sizeof(struct ipv6hdr) < data_end) {
+			UPDATE_STATISTICS_V6
+		}
 	}
+	else {
+		if ( (void*) iph4 + sizeof(struct iphdr) < data_end) {
+			UPDATE_STATISTICS_V4
+		}
+	}
+			
 
 	/* Collect the required statistics. */
 	__u32 key = ipv6field >> (IPV6FIELDLENGTH-BINBASE);
@@ -352,11 +404,50 @@ elif prog == 'tc':
             /* Remove the byte used for the flow label */
             ipv6field |= (iph6->flow_lbl[0] >> 4);
     """
-else: # prog = 'hl'
+elif prog == 'hl': # prog = 'hl'
     src = """
             ipv6field = iph6->hop_limit;
     """
-bpfprog = re.sub(r'UPDATE_STATISTICS',src, bpfprog)
+elif prog == 'nh': 
+    src = """
+            ipv6field = iph6->nexthdr;
+    """
+elif prog == 'pl':
+    src = """
+            ipv6field = ntohs(iph6->payload_len);
+    """
+elif prog == 'tos':
+    src = """
+        ipv6field = iph4->tos;
+    """
+elif prog == 'ttl':
+    src = """
+        ipv6field = iph4->ttl;
+    """
+elif prog == 'ihl':
+    src = """
+        ipv6field = iph4->ihl;
+    """
+elif prog == 'id':
+    src = """
+        ipv6field = ntohs(iph4->id);
+    """
+elif prog == 'fo':
+    src = """
+        ipv6field = iph4->ntohs(iph4->frag_off) & 0x1fff;
+    """
+else:
+    raise ValueErr("Invalid field name!")
+
+
+if prog in ipv6_fields:
+    bpfprog = re.sub(r'UPDATE_STATISTICS_V6',src, bpfprog)
+    bpfprog = re.sub(r'UPDATE_STATISTICS_V4',"", bpfprog)
+elif prog in ipv4_fields:
+    bpfprog = re.sub(r'UPDATE_STATISTICS_V6',"", bpfprog)
+    bpfprog = re.sub(r'UPDATE_STATISTICS_V4',src, bpfprog)
+else:
+    raise ValueErr("Unmanaged field!!!")
 
 if param.print:
     print(bpfprog)
