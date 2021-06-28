@@ -31,8 +31,8 @@ class InvalidParameterError(Exception):
 # Parse parameters from the command line
 parser = argparse.ArgumentParser(description='Run bpf inspectors on IPv6 header.',
 		epilog='Beware to select the correct bin number!')
-parser.add_argument('-t','--type', choices=['fl','tc','hl'],
-        help='Type of statistics to collect: fl (flow label), tc (traffic class), hl (hop limit)',
+parser.add_argument('-t','--type', choices=['fl','tc','hl','nh','pl'],
+        help='Type of statistics to collect: fl (flow label), tc (traffic class), hl (hop limit), nh (next header), pl (payload length)',
         metavar='PROG', required=True)
 parser.add_argument('-d','--dev', 
 		help='Network interface to attach the program to', required=True)
@@ -57,6 +57,8 @@ output_file_name=param.write
 
 if prog == "fl":
     ipv6fieldlength=20
+elif prog == "pl":
+    ipv6fieldlength=16
 else:
     ipv6fieldlength=8
 
@@ -113,10 +115,22 @@ elif prog == 'tc':
             /* Remove the byte used for the flow label */
             ipv6field |= (iph6->flow_lbl[0] >> 4);
     """
-else: # prog = 'hl'
+elif prog == 'hl': # prog = 'hl'
     src = """
             ipv6field = iph6->hop_limit;
     """
+elif prog == 'nh': 
+    src = """
+            ipv6field = iph6->nexthdr;
+    """
+elif prog == 'pl':
+    src = """
+            ipv6field = ntohs(iph6->payload_len);
+    """
+else:
+    raise ValueErr("Invalid field name!")
+
+
 bpfprog = re.sub(r'UPDATE_STATISTICS',src, bpfprog)
 
 if param.print:
