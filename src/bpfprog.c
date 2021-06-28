@@ -40,9 +40,9 @@ SETBINBASE
 /* TODO: Improve performance by using multiple per-cpu hash maps.
  */
 #ifdef __BCC__
-BPF_ARRAY(ipv6_stats_map, __u32, NBINS);
+BPF_ARRAY(ip_stats_map, __u32, NBINS);
 #else
-struct bpf_map_def SEC("maps") ipv6_stats_map = {
+struct bpf_map_def SEC("maps") ip_stats_map = {
 	.type = BPF_MAP_TYPE_ARRAY,
 	.key_size = sizeof(__u32),
 	.value_size = sizeof(__u32),
@@ -186,18 +186,18 @@ static __always_inline int parse_ip6hdr(struct hdr_cursor *nh,
 }
 			
 #ifdef __BCC__
-BCC_SEC("ipv6_stats")
+BCC_SEC("ip_stats")
 #else
-SEC("ipv6_stats")
+SEC("ip_stats")
 #endif
-int  ipv6_stats(struct __sk_buff *skb)
+int  ip_stats(struct __sk_buff *skb)
 {
 	/* Preliminary step: cast to void*.
 	 * (Not clear why data/data_end are stored as long)
 	 */
 	void *data_end = (void *)(long)skb->data_end;
 	void *data     = (void *)(long)skb->data;
-	__u32 ipv6field = 0;
+	__u32 ipfield = 0;
 	__u32 len = 0;
 	__u32 init_value = 1;
 	unsigned int vers = 0;
@@ -255,18 +255,18 @@ int  ipv6_stats(struct __sk_buff *skb)
 			
 
 	/* Collect the required statistics. */
-	__u32 key = ipv6field >> (IPV6FIELDLENGTH-BINBASE);
+	__u32 key = ipfield >> (IPV6FIELDLENGTH-BINBASE);
 	__u32 *counter = 
 #ifndef __BCC__
-		bpf_map_lookup_elem(&ipv6_stats_map, &key);
+		bpf_map_lookup_elem(&ip_stats_map, &key);
 #else
-		ipv6_stats_map.lookup(&key);
+		ip_stats_map.lookup(&key);
 #endif
 	if(!counter)
 #ifndef __BCC__
-		bpf_map_update_elem(&ipv6_stats_map, &key, &init_value, BPF_ANY);
+		bpf_map_update_elem(&ip_stats_map, &key, &init_value, BPF_ANY);
 #else
-		ipv6_stats_map.update(&key, &init_value);
+		ip_stats_map.update(&key, &init_value);
 #endif
 	else
 		__sync_fetch_and_add(counter, 1);

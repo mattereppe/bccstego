@@ -48,7 +48,7 @@ parser.add_argument('-p','--print', help='Print the built bpf program', action='
 param = parser.parse_args()
 
 dev=param.dev
-bpfsec='ipv6_stats'
+bpfsec='ip_stats'
 direction=param.dir
 prog=param.type
 binbase=param.binbase
@@ -58,19 +58,19 @@ output_file_name=param.write
 ipv6_fields = {"fl", "tc", "hl", "nh", "pl"}
 ipv4_fields = {"tos", "ttl", "ihl", "id", "fo"}
 if prog == "fl":
-    ipv6fieldlength=20
+    ipfieldlength=20
 elif prog == "pl" or prog == "id":
-    ipv6fieldlength=16
+    ipfieldlength=16
 elif prog == "ihl":
-    ipv6fieldlength=4
+    ipfieldlength=4
 elif prog == "fo":
-    ipv6fieldlength=13
+    ipfieldlength=13
 else:
-    ipv6fieldlength=8
+    ipfieldlength=8
 
 # Check that the number of required bins is no larger
 # than the space of field values
-if binbase > ipv6fieldlength:
+if binbase > ipfieldlength:
     raise InvalidParameterError("Number of bins too big!")
 
 ipr = IPRoute()
@@ -100,58 +100,58 @@ BPFPROG_SRC_CODE
 # Set the required number of bins in the source file
 bpfprog = re.sub(r'SETBINBASE',r'#define BINBASE ' + str(binbase), bpfprog)
 # Set the length of field to be monitored
-bpfprog = re.sub(r'IPV6FIELDLENGTH',str(ipv6fieldlength), bpfprog)
+bpfprog = re.sub(r'IPV6FIELDLENGTH',str(ipfieldlength), bpfprog)
 # Set the specific code to read the required field
 if prog == 'fl':
     src = """
             for(short i=0;i<3;i++) {
-                ipv6field |= iph6->flow_lbl[i];
+                ipfield |= iph6->flow_lbl[i];
                 if(i==0) {
                     /* Remove DSCP value */
-                    ipv6field &=0x0f;
+                    ipfield &=0x0f;
                 }
                 if(i!=2)
-                    ipv6field <<= 8;
+                    ipfield <<= 8;
             }
     """
 elif prog == 'tc':
     src = """
-            ipv6field = iph6->priority;
-            ipv6field <<=4;
+            ipfield = iph6->priority;
+            ipfield <<=4;
             /* Remove the byte used for the flow label */
-            ipv6field |= (iph6->flow_lbl[0] >> 4);
+            ipfield |= (iph6->flow_lbl[0] >> 4);
     """
 elif prog == 'hl': # prog = 'hl'
     src = """
-            ipv6field = iph6->hop_limit;
+            ipfield = iph6->hop_limit;
     """
 elif prog == 'nh': 
     src = """
-            ipv6field = iph6->nexthdr;
+            ipfield = iph6->nexthdr;
     """
 elif prog == 'pl':
     src = """
-            ipv6field = ntohs(iph6->payload_len);
+            ipfield = ntohs(iph6->payload_len);
     """
 elif prog == 'tos':
     src = """
-        ipv6field = iph4->tos;
+        ipfield = iph4->tos;
     """
 elif prog == 'ttl':
     src = """
-        ipv6field = iph4->ttl;
+        ipfield = iph4->ttl;
     """
 elif prog == 'ihl':
     src = """
-        ipv6field = iph4->ihl;
+        ipfield = iph4->ihl;
     """
 elif prog == 'id':
     src = """
-        ipv6field = ntohs(iph4->id);
+        ipfield = ntohs(iph4->id);
     """
 elif prog == 'fo':
     src = """
-        ipv6field = iph4->ntohs(iph4->frag_off) & 0x1fff;
+        ipfield = iph4->ntohs(iph4->frag_off) & 0x1fff;
     """
 else:
     raise ValueErr("Invalid field name!")
@@ -170,7 +170,7 @@ if param.print:
     print(bpfprog)
 
 prog = BPF(text=bpfprog, cflags=["-I/usr/include/"], debug=0)
-fn = prog.load_func("ipv6_stats", BPF.SCHED_CLS)
+fn = prog.load_func("ip_stats", BPF.SCHED_CLS)
 if direction == "ingress":
     ipr.tc("add-filter", "bpf", idx, ":1", fd=fn.fd, name=fn.name, 
             parent="ffff:fff2", classid=1, direct_action=True)
@@ -178,7 +178,7 @@ else:
     ipr.tc("add-filter", "bpf", idx, ":1", fd=fn.fd, name=fn.name, 
             parent="ffff:fff3", classid=1, direct_action=True)
         
-hist = prog.get_table('ipv6_stats_map')
+hist = prog.get_table('ip_stats_map')
 
 try:
     prev_values = hist.items() # Read initial values, but do not print them

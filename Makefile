@@ -1,5 +1,5 @@
 # Short name for build target
-PYTHON_TARGET := ip6hstats
+PYTHON_TARGET := iphstats
 
 SED ?= sed
 CHMOD ?= chmod
