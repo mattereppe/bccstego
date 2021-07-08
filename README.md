@@ -17,9 +17,9 @@ The program is rather simple to use, and just requires a couple of mandatory par
 The in-line help provides a short summary of all main options.
 
 ```Shell
-% sudo ./iphstats.py   --help
-usage: iphstats.py [-h] -t PROG -d DEV [-b BINBASE] [-i INT] [-w FILE] [--dir {ingress,egress}]
-                   [-p]
+% sudo ./ipstats.py --help
+usage: ipstats.py [-h] -t PROG -d DEV [-b BINBASE] [-i INT] [-w FILE] [--dir {ingress,egress}]
+                  [-p]
 
 Run bpf inspectors on IPv6 header.
 
@@ -28,7 +28,9 @@ optional arguments:
   -t PROG, --type PROG  Type of statistics to collect. Allowed values for IPv6: fl (flow label),
                         tc (traffic class), hl (hop limit), nh (next header), pl (payload length).
                         Allowed valued for IPv4: tos (type of service), ttl (time-to-live), ihl
-                        (internet header length), id (identification), fo (fragment offset)
+                        (internet header length), id (identification), fo (fragment offset).
+                        Allowed values for TCP: ts (timestamp), ack (acknowledge number), res
+                        (reserved bits). Allowed values for UDP: chk (checksum)
   -d DEV, --dev DEV     Network interface to attach the program to
   -b BINBASE, --binbase BINBASE
                         Exponent for the number of bins (nbins is computed as 2^BINBASE)
