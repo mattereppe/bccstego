@@ -1,6 +1,6 @@
 # bccstego
 
-This tool inspects IP packets and creates an histogram of seen values used for a specific header field. Version 0.1 only supported IPv6, whereas version 0.2 introduces support for IPv4. According, the name of the main executable changed from <code>iph6stats.py</code> to <code>iphstats.py</code>. The list of supported fields includes those that can be likely used for creating covert channels, and currently includes both IPv6 (flow label, traffic class, hop limit) and IPv4 (type of service/differentiated service code pointer, identification, time-to-live, fragment offset, internet header length). 
+This tool inspects IP packets and creates an histogram of seen values used for a specific header field. Version 0.1 only supported IPv6, version 0.2 added support for IPv4, and finally version 0.3 extended to L4 headers as well. According, the name of the main executable is now <code>ipstats.py</code>. The list of supported fields includes those that can be likely used for creating covert channels, and currently includes both IPv6 (flow label, traffic class, hop limit), IPv4 (type of service/differentiated service code pointer, identification, time-to-live, fragment offset, internet header length), TCP (ack, reserved bits, timestamp), and UDP (checksum). 
 
 
 The histogram is made of a given number of bins, and all possible field values are equally divided into the available bins, in a consecutive way. Practically speaking, the field values grouped into the same bin share the same prefix, which is also used as the <i>key</i> in the output (the number of shared bits depends on the number of bins). 
@@ -51,7 +51,7 @@ This software makes use of the <A href="https://github.com/iovisor/bcc">BPF Comp
 
 The program is a single python script which embeds all the necessary code to assemble, compile and install the BPF filter. The github repository maintains the latest version already built and ready to use.
 
-Anyway, additional modifications might be necessary to include additional use cases or to modify the output. For instance, it should be extended to work with other protocols (TCP, UDP, ICMP) and additional fields (IP options).
+Anyway, additional modifications might be necessary to include additional use cases or to modify the output. For instance, it should be extended to work with other protocols (ICMP) and additional fields (TCP/IP options).
 
 The preferred way to make modifications is to edit the source templates in the <code>src/</code> directory and build a new executable through the provided Makefile.
 There are two templates in the <code>src</code> directory, which make it simpler to maintain and update the source code for the user and kernel spaces.
@@ -61,7 +61,7 @@ It can be modified to parse additional packet headers, or to collect different k
 <ul>
 <li>SETBINBASE: This is replaced by the exponent that defines the number of bins to be used for the histogram. 
 <li>IPFIELDLENGTH: This is replaced by the bitlength of the field to be monitored (which must be computed by the python code).
-<li>UPDATE_STATISTICS_V4/UPDATE_STATISTICS_V6: This is replaced by the code snippet that handles the specific field (be aware that some fields in the IPv6 header are not byte aligned). There are two different placeholders for IPv4 and IPv6 fields, respectively. 
+<li>UPDATE_STATISTICS_V4/UPDATE_STATISTICS_V6/UPDATE_STATISTICS_L4: This is replaced by the code snippet that handles the specific field (be aware that some fields in the IPv6 header are not byte aligned). There are three different placeholders for IPv4, IPv6, and TCP/UDP fields, respectively. 
 </ul>
 
 <code>userprog.py</code> is the python program alone, with placeholders for the bpf code. 
@@ -70,7 +70,7 @@ It also includes code snippets for handling different header fields, which are m
 <ul>
   <li> Add the codename for the new fields in the inline help (edit both _choises_ and _help_ of the _type_ argument).
   <li> Set the maxiumum field length through the <code>ipfieldlength</code> variable, if different from 8 (check the cascading if-elif definition).
-  <li> Look for the cascading if-elif definition for the <code>ipfield</code> variable and add the case for the new field. You have to put the code to load the field value into the <code>ipfield</code> variable; this is usually as simple as reading data from a <code>struct iphdr/struct ipv6hdr</code>.
+  <li> Look for the cascading if-elif definition for the <code>ipfield</code> variable and add the case for the new field. You have to put the code to load the field value into the <code>ipfield</code> variable; this is usually as simple as reading data from a <code>struct iphdr/struct ipv6hdr/struct tcphdr/struct udphdr</code>.
 </ul>
 
 After changing the code, just run <code>make</code> to build the new python executable.
@@ -157,8 +157,8 @@ $  ping6 fe80::f816:3eff:fe36:da7d
   
 ## Limitations and known bugs
   
-Extending the software to cover additional protocols (e.g., TCP, UDP, ICMP) requires modification of the bpf code. An additional function to parse the protocol header must be defined, together with the proper switch cases in the main function (<code>ip_stats</code>).
-  
+Extending the software to cover additional protocols (e.g., ICMP) requires modification of the bpf code. An additional function to parse the protocol header must be defined, together with the proper switch cases in the main function (<code>nw_stats</code>).
+ 
 Extending the software to cover option fields requires modification of the bpf code too. Parsing of IP options has not been implemented so far because dealing with variable fields is not trivial with eBPF, and it is likely that the resulting code exceeds the current limitations of the verifier.
   
 With kernel versions > 5.10, there are at least 3 warnings about redefinition of macros (at least with BCC libraries <= 0.18). This does not affect the compilation and verification of the bpf code.
