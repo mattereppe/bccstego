@@ -17,7 +17,7 @@ The program is rather simple to use, and just requires a couple of mandatory par
 The in-line help provides a short summary of all main options.
 
 ```Shell
-% sudo ./ipstats.py --help
+% sudo ./ipstats.py -h
 usage: ipstats.py [-h] -t PROG -d DEV [-b BINBASE] [-i INT] [-w FILE] [--dir {ingress,egress}]
                   [-p]
 
@@ -29,8 +29,9 @@ optional arguments:
                         tc (traffic class), hl (hop limit), nh (next header), pl (payload length).
                         Allowed valued for IPv4: tos (type of service), ttl (time-to-live), ihl
                         (internet header length), id (identification), fo (fragment offset).
-                        Allowed values for TCP: ts (timestamp), ack (acknowledge number), res
-                        (reserved bits). Allowed values for UDP: chk (checksum)
+                        Allowed values for TCP: ts1 (timestamp), ts2 (timestamp echo), ack
+                        (acknowledge number), res (reserved bits). Allowed values for UDP: chk
+                        (checksum)
   -d DEV, --dev DEV     Network interface to attach the program to
   -b BINBASE, --binbase BINBASE
                         Exponent for the number of bins (nbins is computed as 2^BINBASE)
