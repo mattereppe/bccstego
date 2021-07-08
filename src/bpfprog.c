@@ -114,9 +114,24 @@ struct tcpopt {
 };
 
 struct optvalues {
-	__u16* mss;
-	__u8* wndw_scale;
+	__u16 mss;
+	__u8 wndw_scale;
+	__u32 timestamp1;
+	__u32 timestamp2;
 };
+
+static __always_inline int tcpopt_type(void * tcph, unsigned int offset, void *data_end)
+{
+	struct tcp_opt_none *opn;
+
+	opn = (struct tcp_opt_none *)(tcph+offset);
+
+	if ( (void *)(opn+1) > data_end )
+		return -1;
+	else
+		return opn->type;
+	
+}
 
 static __always_inline int proto_is_vlan(__u16 h_proto)
 {
@@ -254,7 +269,7 @@ static __always_inline int parse_udphdr(struct hdr_cursor *nh,
 	int len;
 	struct udphdr *h = nh->pos;
 
-	if (h + 1 > data_end)
+	if ((void *)(h + 1) > data_end)
 		return -1;
 
 	nh->pos  = h + 1;
@@ -269,7 +284,7 @@ static __always_inline int parse_udphdr(struct hdr_cursor *nh,
 
 static __always_inline int parse_tcpopt(struct tcphdr *tcph,
 					void *data_end,
-					struct optvalues value)
+					struct optvalues *value)
 {
 	unsigned short op_tot_len = 0;
 	unsigned short last_op = 0;
@@ -289,7 +304,6 @@ static __always_inline int parse_tcpopt(struct tcphdr *tcph,
 	if( (void *)(tcph+1)+op_tot_len > data_end )
 		return -1;
 
-	
 	/* 10 loops is arbitrary, hoping this could cover most use-cases.
 	 * A fixed boundary is required by the internal verifier.
 	 */
@@ -306,23 +320,23 @@ static __always_inline int parse_tcpopt(struct tcphdr *tcph,
 				break;
 			case TCP_OPT_MSS:
 				mss = (struct tcp_opt_mss *)((void *)tcph+offset);
-				if( mss+1 > data_end )
+				if( (void *)(mss+1) > data_end )
 					return -1;
 				offset+=mss->len;
 				op_tot_len-=mss->len;
-				*value.mss = ntohs(mss->data);
+				value->mss = bpf_ntohs(mss->data);
 				break;
 			case TCP_OPT_WNDWS:
 				wndw_scale = (struct tcp_opt_wndw_scale *)((void *)tcph+offset);
-				if( wndw_scale+1 > data_end )
+				if( (void *)(wndw_scale+1) > data_end )
 					return -1;
 				offset+=wndw_scale->len;
 				op_tot_len-=wndw_scale->len;
-				*value.wndw_scale = wndw_scale->data;
+				value->wndw_scale = wndw_scale->data;
 				break;
 			case TCP_OPT_SACKP:
 				sackp = (struct tcp_opt_sackp *)((void *)tcph+offset);
-				if( sackp+1 > data_end)
+				if( (void *)(sackp+1) > data_end)
 					return -1;
 				offset+=sackp->len;
 				op_tot_len-=sackp->len;
@@ -330,7 +344,7 @@ static __always_inline int parse_tcpopt(struct tcphdr *tcph,
 				break;
 			case TCP_OPT_SACK:
 				sack = (struct tcp_opt_sack *)((void *)tcph+offset);
-				if( sack+1 > data_end)
+				if( (void *)(sack+1) > data_end)
 					return -1;
 				offset+=sack->len;
 				op_tot_len-=sack->len;
@@ -338,11 +352,12 @@ static __always_inline int parse_tcpopt(struct tcphdr *tcph,
 				break;
 			case TCP_OPT_TS:
 				ts = (struct tcp_opt_ts *)((void *)tcph+offset);
-				if( ts+1 > data_end)
+				if( (void *)(ts+1) > data_end)
 					return -1;
 				offset+=ts->len;
 				op_tot_len-=ts->len;
-				// No data read for this option
+				value->timestamp1=bpf_ntohl(ts->data[0]);
+				value->timestamp2=bpf_ntohl(ts->data[1]);
 				break;
 			default:
 				last_op = 1;
@@ -367,7 +382,7 @@ static __always_inline int parse_tcphdr(struct hdr_cursor *nh,
 	int len;
 	struct tcphdr *h = nh->pos;
 
-	if (h + 1 > data_end)
+	if ((void *)(h + 1) > data_end)
 		return -1;
 
 	len = h->doff * 4;
@@ -403,7 +418,7 @@ int  ip_stats(struct __sk_buff *skb)
 	__u32 len = 0;
 	__u32 init_value = 1;
 	unsigned int vers = 0;
-	unsigned int op_len=0;
+	int op_len=0;
 	int eth_proto, ip_proto = 0;
 	/* int eth_proto, ip_proto, icmp_type = 0; */
 /*	struct flowid flow = { 0 }; */
@@ -411,8 +426,9 @@ int  ip_stats(struct __sk_buff *skb)
 	struct ethhdr *eth;
 	struct ipv6hdr* iph6;
 	struct iphdr *iph4;
-	struct tcphdr *tcphdr;
-	struct udphdr *udphdr;
+	struct tcphdr *tcphdr = 0;
+	struct udphdr *udphdr = 0;
+	struct optvalues tcpopts = { 0 };
 	__u64 ts, te;
 
 	ts = bpf_ktime_get_ns();	
@@ -452,10 +468,11 @@ int  ip_stats(struct __sk_buff *skb)
 				return TC_ACT_OK;
 			break;*/
 		case IPPROTO_TCP:
-			if( parse_tcphdr(&nh, data_end, &tcphdr) < 0 )
+			if( parse_tcphdr(&nh, data_end, &tcphdr) < 0 ) {
 				return TC_ACT_OK;
+			}
 			else
-				op_len = parse_tcpopt;
+				op_len = parse_tcpopt(tcphdr, data_end, &tcpopts);
 			break;
 		case IPPROTO_UDP:
 			if( parse_udphdr(&nh, data_end, &udphdr) < 0 )

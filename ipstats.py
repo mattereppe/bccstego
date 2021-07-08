@@ -31,8 +31,8 @@ class InvalidParameterError(Exception):
 # Parse parameters from the command line
 parser = argparse.ArgumentParser(description='Run bpf inspectors on IPv6 header.',
 		epilog='Beware to select the correct bin number!')
-parser.add_argument('-t','--type', choices=['fl','tc','hl','nh','pl','tos','ttl','ihl', 'id','fo'],
-        help='Type of statistics to collect. Allowed values for IPv6: fl (flow label), tc (traffic class), hl (hop limit), nh (next header), pl (payload length). Allowed valued for IPv4: tos (type of service), ttl (time-to-live), ihl (internet header length), id (identification), fo (fragment offset)',
+parser.add_argument('-t','--type', choices=['fl','tc','hl','nh','pl','tos','ttl','ihl', 'id','fo','ts1','ts2','ack','res','chk'],
+        help='Type of statistics to collect. Allowed values for IPv6: fl (flow label), tc (traffic class), hl (hop limit), nh (next header), pl (payload length). Allowed valued for IPv4: tos (type of service), ttl (time-to-live), ihl (internet header length), id (identification), fo (fragment offset). Allowed values for TCP: ts1 (timestamp), ts2 (timestamp echo), ack (acknowledge number), res (reserved bits). Allowed values for UDP: chk (checksum)',
         metavar='PROG', required=True)
 parser.add_argument('-d','--dev', 
 		help='Network interface to attach the program to', required=True)
@@ -57,14 +57,20 @@ output_file_name=param.write
 
 ipv6_fields = {"fl", "tc", "hl", "nh", "pl"}
 ipv4_fields = {"tos", "ttl", "ihl", "id", "fo"}
+tcp_fields = {"ts1","ts2","ack","res"}
+udp_fields = {"chk"}
 if prog == "fl":
     ipfieldlength=20
-elif prog == "pl" or prog == "id":
+elif prog == "pl" or prog == "id" or prog == "chk":
     ipfieldlength=16
 elif prog == "ihl":
     ipfieldlength=4
 elif prog == "fo":
     ipfieldlength=13
+elif prog == "ack" or prog == "ts1" or prog == "ts2":
+	ipfieldlength=32
+elif prog == "res":
+	ipfieldlength=4
 else:
     ipfieldlength=8
 
@@ -137,9 +143,9 @@ SETBINBASE
 /* TODO: Improve performance by using multiple per-cpu hash maps.
  */
 #ifdef __BCC__
-BPF_ARRAY(ip_stats_map, __u32, NBINS);
+BPF_ARRAY(nw_stats_map, __u32, NBINS);
 #else
-struct bpf_map_def SEC("maps") ip_stats_map = {
+struct bpf_map_def SEC("maps") nw_stats_map = {
 	.type = BPF_MAP_TYPE_ARRAY,
 	.key_size = sizeof(__u32),
 	.value_size = sizeof(__u32),
@@ -156,6 +162,79 @@ struct bpf_map_def SEC("maps") ip_stats_map = {
 struct hdr_cursor {
         void *pos;
 };
+
+/* TCP options */
+#define TCP_OPT_END	0
+#define TCP_OPT_NONE	1
+#define TCP_OPT_MSS	2
+#define TCP_OPT_WNDWS	3
+#define TCP_OPT_SACKP	4
+#define TCP_OPT_SACK	5
+#define TCP_OPT_TS	8
+
+struct tcp_opt_none {
+	__u8 type;
+};
+
+struct tcp_opt_mss {
+	__u8 type;
+	__u8 len;
+	__u16 data;
+};
+
+struct tcp_opt_wndw_scale {
+	__u8 type;
+	__u8 len;
+	__u8 data;
+};
+
+struct tcp_opt_sackp {
+	__u8 type;
+	__u8 len;
+};
+
+/* Bypassing the verifier check is not simple with variable data,
+ * but for now I don't need to parse sack data.
+ */
+struct tcp_opt_sack {
+	__u8 type;
+	__u8 len;
+//	__u32 data[8];
+};
+
+struct tcp_opt_ts {
+	__u8 type;
+	__u8 len;
+	__u32 data[2];
+};
+
+struct tcpopt {
+	struct tcp_opt_mss *op_mss;
+	struct tcp_opt_wndw_scale *op_wndw_scale;
+	struct tcp_opt_sackp *op_sackp;
+	struct tcp_opt_sack *op_sack;
+	struct tcp_opt_ts *op_ts;
+};
+
+struct optvalues {
+	__u16 mss;
+	__u8 wndw_scale;
+	__u32 timestamp1;
+	__u32 timestamp2;
+};
+
+static __always_inline int tcpopt_type(void * tcph, unsigned int offset, void *data_end)
+{
+	struct tcp_opt_none *opn;
+
+	opn = (struct tcp_opt_none *)(tcph+offset);
+
+	if ( (void *)(opn+1) > data_end )
+		return -1;
+	else
+		return opn->type;
+	
+}
 
 static __always_inline int proto_is_vlan(__u16 h_proto)
 {
@@ -282,6 +361,150 @@ static __always_inline int parse_ip6hdr(struct hdr_cursor *nh,
 	return ip6h->nexthdr;
 }
 			
+
+/*
+ * parse_udphdr: parse the udp header and return the length of the udp payload
+ */
+static __always_inline int parse_udphdr(struct hdr_cursor *nh,
+					void *data_end,
+					struct udphdr **udphdr)
+{
+	int len;
+	struct udphdr *h = nh->pos;
+
+	if ((void *)(h + 1) > data_end)
+		return -1;
+
+	nh->pos  = h + 1;
+	*udphdr = h;
+
+	len = bpf_ntohs(h->len) - sizeof(struct udphdr);
+	if (len < 0)
+		return -1;
+
+	return len;
+}
+
+static __always_inline int parse_tcpopt(struct tcphdr *tcph,
+					void *data_end,
+					struct optvalues *value)
+{
+	unsigned short op_tot_len = 0;
+	unsigned short last_op = 0;
+	struct tcp_opt_mss *mss = 0;
+	struct tcp_opt_wndw_scale *wndw_scale = 0;
+	struct tcp_opt_sackp *sackp = 0;
+	struct tcp_opt_sack *sack = 0;
+	struct tcp_opt_ts *ts = 0;
+	unsigned int offset = 20;
+	__u8 type;
+
+	op_tot_len = (tcph->doff - 5)*4;
+
+	if( op_tot_len < 0 )
+		return -1;
+	
+	if( (void *)(tcph+1)+op_tot_len > data_end )
+		return -1;
+
+	/* 10 loops is arbitrary, hoping this could cover most use-cases.
+	 * A fixed boundary is required by the internal verifier.
+	 */
+	for(unsigned int i=0; i<5; i++)
+	{
+		type = tcpopt_type((void *) tcph, offset,data_end);
+	
+		switch ( type ) {
+			case TCP_OPT_END:
+				last_op = 1;
+			case TCP_OPT_NONE:
+				offset++;
+				op_tot_len--;
+				break;
+			case TCP_OPT_MSS:
+				mss = (struct tcp_opt_mss *)((void *)tcph+offset);
+				if( (void *)(mss+1) > data_end )
+					return -1;
+				offset+=mss->len;
+				op_tot_len-=mss->len;
+				value->mss = bpf_ntohs(mss->data);
+				break;
+			case TCP_OPT_WNDWS:
+				wndw_scale = (struct tcp_opt_wndw_scale *)((void *)tcph+offset);
+				if( (void *)(wndw_scale+1) > data_end )
+					return -1;
+				offset+=wndw_scale->len;
+				op_tot_len-=wndw_scale->len;
+				value->wndw_scale = wndw_scale->data;
+				break;
+			case TCP_OPT_SACKP:
+				sackp = (struct tcp_opt_sackp *)((void *)tcph+offset);
+				if( (void *)(sackp+1) > data_end)
+					return -1;
+				offset+=sackp->len;
+				op_tot_len-=sackp->len;
+				// No data read for this option
+				break;
+			case TCP_OPT_SACK:
+				sack = (struct tcp_opt_sack *)((void *)tcph+offset);
+				if( (void *)(sack+1) > data_end)
+					return -1;
+				offset+=sack->len;
+				op_tot_len-=sack->len;
+				// No data read for this option
+				break;
+			case TCP_OPT_TS:
+				ts = (struct tcp_opt_ts *)((void *)tcph+offset);
+				if( (void *)(ts+1) > data_end)
+					return -1;
+				offset+=ts->len;
+				op_tot_len-=ts->len;
+				value->timestamp1=bpf_ntohl(ts->data[0]);
+				value->timestamp2=bpf_ntohl(ts->data[1]);
+				break;
+			default:
+				last_op = 1;
+				break;
+
+		}
+
+		if ( last_op || op_tot_len <= 0)
+			break;
+	}
+
+	return op_tot_len;
+}
+
+/*
+ * parse_tcphdr: parse and return the length of the tcp header
+ */
+static __always_inline int parse_tcphdr(struct hdr_cursor *nh,
+					void *data_end,
+					struct tcphdr **tcphdr)
+{
+	int len;
+	struct tcphdr *h = nh->pos;
+
+	if ((void *)(h + 1) > data_end)
+		return -1;
+
+	len = h->doff * 4;
+	// Sanity check packet field is valid 
+	if(len < sizeof(h))
+		return -1;
+
+	// Variable-length TCP header, need to use byte-based arithmetic 
+	if (nh->pos + len > data_end)
+		return -1;
+
+	nh->pos += len;
+	*tcphdr = h;
+
+	return data_end - nh->pos;
+}
+
+
+
 #ifdef __BCC__
 BCC_SEC("ip_stats")
 #else
@@ -298,6 +521,7 @@ int  ip_stats(struct __sk_buff *skb)
 	__u32 len = 0;
 	__u32 init_value = 1;
 	unsigned int vers = 0;
+	int op_len=0;
 	int eth_proto, ip_proto = 0;
 	/* int eth_proto, ip_proto, icmp_type = 0; */
 /*	struct flowid flow = { 0 }; */
@@ -305,6 +529,9 @@ int  ip_stats(struct __sk_buff *skb)
 	struct ethhdr *eth;
 	struct ipv6hdr* iph6;
 	struct iphdr *iph4;
+	struct tcphdr *tcphdr = 0;
+	struct udphdr *udphdr = 0;
+	struct optvalues tcpopts = { 0 };
 	__u64 ts, te;
 
 	ts = bpf_ktime_get_ns();	
@@ -337,6 +564,32 @@ int  ip_stats(struct __sk_buff *skb)
 		return TC_ACT_OK;
 	}	
 
+	switch (ip_proto) {
+	/*	case IPPROTO_ICMP:
+		case IPPROTO_ICMPV6:
+			if( process_icmp_header(&nh, data_end, &icmphdrc, &key) < 0 )
+				return TC_ACT_OK;
+			break;*/
+		case IPPROTO_TCP:
+			if( parse_tcphdr(&nh, data_end, &tcphdr) < 0 ) {
+				return TC_ACT_OK;
+			}
+			else
+				op_len = parse_tcpopt(tcphdr, data_end, &tcpopts);
+			break;
+		case IPPROTO_UDP:
+			if( parse_udphdr(&nh, data_end, &udphdr) < 0 )
+				return TC_ACT_OK;
+			break;
+		default:
+			/* TODO: cound how many packets/bytes are seen from
+			 * unmanaged protocols, so we can understand the impact
+			 * of such traffic. 
+			 * Hints: a common line with IPPROTO_MAX may be used.
+			 */
+			return TC_ACT_OK;
+	}
+
 	/* Check statistics
 	 */
 	if ( vers == 6 ) {
@@ -349,21 +602,23 @@ int  ip_stats(struct __sk_buff *skb)
 			UPDATE_STATISTICS_V4
 		}
 	}
+
+	UPDATE_STATISTICS_L4
 			
 
 	/* Collect the required statistics. */
 	__u32 key = ipfield >> (IPFIELDLENGTH-BINBASE);
 	__u32 *counter = 
 #ifndef __BCC__
-		bpf_map_lookup_elem(&ip_stats_map, &key);
+		bpf_map_lookup_elem(&nw_stats_map, &key);
 #else
-		ip_stats_map.lookup(&key);
+		nw_stats_map.lookup(&key);
 #endif
 	if(!counter)
 #ifndef __BCC__
-		bpf_map_update_elem(&ip_stats_map, &key, &init_value, BPF_ANY);
+		bpf_map_update_elem(&nw_stats_map, &key, &init_value, BPF_ANY);
 #else
-		ip_stats_map.update(&key, &init_value);
+		nw_stats_map.update(&key, &init_value);
 #endif
 	else
 		__sync_fetch_and_add(counter, 1);
@@ -414,7 +669,7 @@ elif prog == 'nh':
     """
 elif prog == 'pl':
     src = """
-            ipfield = ntohs(iph6->payload_len);
+            ipfield = bpf_ntohs(iph6->payload_len);
     """
 elif prog == 'tos':
     src = """
@@ -430,12 +685,33 @@ elif prog == 'ihl':
     """
 elif prog == 'id':
     src = """
-        ipfield = ntohs(iph4->id);
+        ipfield = bpf_ntohs(iph4->id);
     """
 elif prog == 'fo':
     src = """
-        ipfield = iph4->ntohs(iph4->frag_off) & 0x1fff;
+        ipfield = bpf_ntohs(iph4->frag_off) & 0x1fff;
     """
+elif prog == 'ts1':
+	src = """
+        ipfield = tcpopts.timestamp1;
+	"""
+elif prog == 'ts2':
+	src = """
+        ipfield = tcpopts.timestamp2;
+	"""
+elif prog == 'ack':
+	src = """
+		ipfield = bpf_ntohl(tcphdr->ack_seq);
+	"""
+elif prog == 'res':
+	src = """
+		ipfield = tcphdr->res1;
+	"""
+elif prog == 'chk':
+	src = """
+	    if ( udphdr != NULL )
+	    	ipfield = bpf_ntohs(udphdr->check);
+	"""
 else:
     raise ValueErr("Invalid field name!")
 
@@ -443,9 +719,15 @@ else:
 if prog in ipv6_fields:
     bpfprog = re.sub(r'UPDATE_STATISTICS_V6',src, bpfprog)
     bpfprog = re.sub(r'UPDATE_STATISTICS_V4',"", bpfprog)
+    bpfprog = re.sub(r'UPDATE_STATISTICS_L4',"", bpfprog)
 elif prog in ipv4_fields:
     bpfprog = re.sub(r'UPDATE_STATISTICS_V6',"", bpfprog)
     bpfprog = re.sub(r'UPDATE_STATISTICS_V4',src, bpfprog)
+    bpfprog = re.sub(r'UPDATE_STATISTICS_L4',"", bpfprog)
+elif prog in tcp_fields or prog in udp_fields:
+    bpfprog = re.sub(r'UPDATE_STATISTICS_V6',"", bpfprog)
+    bpfprog = re.sub(r'UPDATE_STATISTICS_V4',"", bpfprog)
+    bpfprog = re.sub(r'UPDATE_STATISTICS_L4',src, bpfprog)
 else:
     raise ValueErr("Unmanaged field!!!")
 
@@ -461,7 +743,7 @@ else:
     ipr.tc("add-filter", "bpf", idx, ":1", fd=fn.fd, name=fn.name, 
             parent="ffff:fff3", classid=1, direct_action=True)
         
-hist = prog.get_table('ip_stats_map')
+hist = prog.get_table('nw_stats_map')
 
 try:
     prev_values = hist.items() # Read initial values, but do not print them

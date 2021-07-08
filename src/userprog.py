@@ -31,8 +31,8 @@ class InvalidParameterError(Exception):
 # Parse parameters from the command line
 parser = argparse.ArgumentParser(description='Run bpf inspectors on IPv6 header.',
 		epilog='Beware to select the correct bin number!')
-parser.add_argument('-t','--type', choices=['fl','tc','hl','nh','pl','tos','ttl','ihl', 'id','fo','ts','ack','res','chk'],
-        help='Type of statistics to collect. Allowed values for IPv6: fl (flow label), tc (traffic class), hl (hop limit), nh (next header), pl (payload length). Allowed valued for IPv4: tos (type of service), ttl (time-to-live), ihl (internet header length), id (identification), fo (fragment offset). Allowed values for TCP: ts (timestamp), ack (acknowledge number), res (reserved bits). Allowed values for UDP: chk (checksum)',
+parser.add_argument('-t','--type', choices=['fl','tc','hl','nh','pl','tos','ttl','ihl', 'id','fo','ts1','ts2','ack','res','chk'],
+        help='Type of statistics to collect. Allowed values for IPv6: fl (flow label), tc (traffic class), hl (hop limit), nh (next header), pl (payload length). Allowed valued for IPv4: tos (type of service), ttl (time-to-live), ihl (internet header length), id (identification), fo (fragment offset). Allowed values for TCP: ts1 (timestamp), ts2 (timestamp echo), ack (acknowledge number), res (reserved bits). Allowed values for UDP: chk (checksum)',
         metavar='PROG', required=True)
 parser.add_argument('-d','--dev', 
 		help='Network interface to attach the program to', required=True)
@@ -57,7 +57,7 @@ output_file_name=param.write
 
 ipv6_fields = {"fl", "tc", "hl", "nh", "pl"}
 ipv4_fields = {"tos", "ttl", "ihl", "id", "fo"}
-tcp_fields = {"ts","ack","res"}
+tcp_fields = {"ts1","ts2","ack","res"}
 udp_fields = {"chk"}
 if prog == "fl":
     ipfieldlength=20
@@ -67,7 +67,7 @@ elif prog == "ihl":
     ipfieldlength=4
 elif prog == "fo":
     ipfieldlength=13
-elif prog == "ack" or prog == "ts":
+elif prog == "ack" or prog == "ts1" or prog == "ts2":
 	ipfieldlength=32
 elif prog == "res":
 	ipfieldlength=4
@@ -137,7 +137,7 @@ elif prog == 'nh':
     """
 elif prog == 'pl':
     src = """
-            ipfield = ntohs(iph6->payload_len);
+            ipfield = bpf_ntohs(iph6->payload_len);
     """
 elif prog == 'tos':
     src = """
@@ -153,18 +153,23 @@ elif prog == 'ihl':
     """
 elif prog == 'id':
     src = """
-        ipfield = ntohs(iph4->id);
+        ipfield = bpf_ntohs(iph4->id);
     """
 elif prog == 'fo':
     src = """
-        ipfield = ntohs(iph4->frag_off) & 0x1fff;
+        ipfield = bpf_ntohs(iph4->frag_off) & 0x1fff;
     """
-elif prog == 'ts':
+elif prog == 'ts1':
 	src = """
+        ipfield = tcpopts.timestamp1;
+	"""
+elif prog == 'ts2':
+	src = """
+        ipfield = tcpopts.timestamp2;
 	"""
 elif prog == 'ack':
 	src = """
-		ipfield = ntohl(tcphdr->ack);
+		ipfield = bpf_ntohl(tcphdr->ack_seq);
 	"""
 elif prog == 'res':
 	src = """
@@ -172,7 +177,8 @@ elif prog == 'res':
 	"""
 elif prog == 'chk':
 	src = """
-		ipfield = ntohs(udphdr->checksum);
+	    if ( udphdr != NULL )
+	    	ipfield = bpf_ntohs(udphdr->check);
 	"""
 else:
     raise ValueErr("Invalid field name!")
@@ -181,11 +187,15 @@ else:
 if prog in ipv6_fields:
     bpfprog = re.sub(r'UPDATE_STATISTICS_V6',src, bpfprog)
     bpfprog = re.sub(r'UPDATE_STATISTICS_V4',"", bpfprog)
+    bpfprog = re.sub(r'UPDATE_STATISTICS_L4',"", bpfprog)
 elif prog in ipv4_fields:
     bpfprog = re.sub(r'UPDATE_STATISTICS_V6',"", bpfprog)
     bpfprog = re.sub(r'UPDATE_STATISTICS_V4',src, bpfprog)
-elif prog in tcp_fields || prog in udp_fields:
-	bpfprog = re.sub(r'UPDATE_STATISTICS_L4',src, bpfprog)
+    bpfprog = re.sub(r'UPDATE_STATISTICS_L4',"", bpfprog)
+elif prog in tcp_fields or prog in udp_fields:
+    bpfprog = re.sub(r'UPDATE_STATISTICS_V6',"", bpfprog)
+    bpfprog = re.sub(r'UPDATE_STATISTICS_V4',"", bpfprog)
+    bpfprog = re.sub(r'UPDATE_STATISTICS_L4',src, bpfprog)
 else:
     raise ValueErr("Unmanaged field!!!")
 
