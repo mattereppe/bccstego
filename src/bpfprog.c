@@ -60,6 +60,64 @@ struct hdr_cursor {
         void *pos;
 };
 
+/* TCP options */
+#define TCP_OPT_END	0
+#define TCP_OPT_NONE	1
+#define TCP_OPT_MSS	2
+#define TCP_OPT_WNDWS	3
+#define TCP_OPT_SACKP	4
+#define TCP_OPT_SACK	5
+#define TCP_OPT_TS	8
+
+struct tcp_opt_none {
+	__u8 type;
+};
+
+struct tcp_opt_mss {
+	__u8 type;
+	__u8 len;
+	__u16 data;
+};
+
+struct tcp_opt_wndw_scale {
+	__u8 type;
+	__u8 len;
+	__u8 data;
+};
+
+struct tcp_opt_sackp {
+	__u8 type;
+	__u8 len;
+};
+
+/* Bypassing the verifier check is not simple with variable data,
+ * but for now I don't need to parse sack data.
+ */
+struct tcp_opt_sack {
+	__u8 type;
+	__u8 len;
+//	__u32 data[8];
+};
+
+struct tcp_opt_ts {
+	__u8 type;
+	__u8 len;
+	__u32 data[2];
+};
+
+struct tcpopt {
+	struct tcp_opt_mss *op_mss;
+	struct tcp_opt_wndw_scale *op_wndw_scale;
+	struct tcp_opt_sackp *op_sackp;
+	struct tcp_opt_sack *op_sack;
+	struct tcp_opt_ts *op_ts;
+};
+
+struct optvalues {
+	__u16* mss;
+	__u8* wndw_scale;
+};
+
 static __always_inline int proto_is_vlan(__u16 h_proto)
 {
         return !!(h_proto == bpf_htons(ETH_P_8021Q) ||
@@ -185,6 +243,7 @@ static __always_inline int parse_ip6hdr(struct hdr_cursor *nh,
 	return ip6h->nexthdr;
 }
 			
+
 /*
  * parse_udphdr: parse the udp header and return the length of the udp payload
  */
@@ -208,6 +267,95 @@ static __always_inline int parse_udphdr(struct hdr_cursor *nh,
 	return len;
 }
 
+static __always_inline int parse_tcpopt(struct tcphdr *tcph,
+					void *data_end,
+					struct optvalues value)
+{
+	unsigned short op_tot_len = 0;
+	unsigned short last_op = 0;
+	struct tcp_opt_mss *mss = 0;
+	struct tcp_opt_wndw_scale *wndw_scale = 0;
+	struct tcp_opt_sackp *sackp = 0;
+	struct tcp_opt_sack *sack = 0;
+	struct tcp_opt_ts *ts = 0;
+	unsigned int offset = 20;
+	__u8 type;
+
+	op_tot_len = (tcph->doff - 5)*4;
+
+	if( op_tot_len < 0 )
+		return -1;
+	
+	if( (void *)(tcph+1)+op_tot_len > data_end )
+		return -1;
+
+	
+	/* 10 loops is arbitrary, hoping this could cover most use-cases.
+	 * A fixed boundary is required by the internal verifier.
+	 */
+	for(unsigned int i=0; i<5; i++)
+	{
+		type = tcpopt_type((void *) tcph, offset,data_end);
+	
+		switch ( type ) {
+			case TCP_OPT_END:
+				last_op = 1;
+			case TCP_OPT_NONE:
+				offset++;
+				op_tot_len--;
+				break;
+			case TCP_OPT_MSS:
+				mss = (struct tcp_opt_mss *)((void *)tcph+offset);
+				if( mss+1 > data_end )
+					return -1;
+				offset+=mss->len;
+				op_tot_len-=mss->len;
+				*value.mss = ntohs(mss->data);
+				break;
+			case TCP_OPT_WNDWS:
+				wndw_scale = (struct tcp_opt_wndw_scale *)((void *)tcph+offset);
+				if( wndw_scale+1 > data_end )
+					return -1;
+				offset+=wndw_scale->len;
+				op_tot_len-=wndw_scale->len;
+				*value.wndw_scale = wndw_scale->data;
+				break;
+			case TCP_OPT_SACKP:
+				sackp = (struct tcp_opt_sackp *)((void *)tcph+offset);
+				if( sackp+1 > data_end)
+					return -1;
+				offset+=sackp->len;
+				op_tot_len-=sackp->len;
+				// No data read for this option
+				break;
+			case TCP_OPT_SACK:
+				sack = (struct tcp_opt_sack *)((void *)tcph+offset);
+				if( sack+1 > data_end)
+					return -1;
+				offset+=sack->len;
+				op_tot_len-=sack->len;
+				// No data read for this option
+				break;
+			case TCP_OPT_TS:
+				ts = (struct tcp_opt_ts *)((void *)tcph+offset);
+				if( ts+1 > data_end)
+					return -1;
+				offset+=ts->len;
+				op_tot_len-=ts->len;
+				// No data read for this option
+				break;
+			default:
+				last_op = 1;
+				break;
+
+		}
+
+		if ( last_op || op_tot_len <= 0)
+			break;
+	}
+
+	return op_tot_len;
+}
 
 /*
  * parse_tcphdr: parse and return the length of the tcp header
@@ -255,6 +403,7 @@ int  ip_stats(struct __sk_buff *skb)
 	__u32 len = 0;
 	__u32 init_value = 1;
 	unsigned int vers = 0;
+	unsigned int op_len=0;
 	int eth_proto, ip_proto = 0;
 	/* int eth_proto, ip_proto, icmp_type = 0; */
 /*	struct flowid flow = { 0 }; */
@@ -305,6 +454,8 @@ int  ip_stats(struct __sk_buff *skb)
 		case IPPROTO_TCP:
 			if( parse_tcphdr(&nh, data_end, &tcphdr) < 0 )
 				return TC_ACT_OK;
+			else
+				op_len = parse_tcpopt;
 			break;
 		case IPPROTO_UDP:
 			if( parse_udphdr(&nh, data_end, &udphdr) < 0 )
