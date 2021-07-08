@@ -160,6 +160,8 @@ $  ping6 fe80::f816:3eff:fe36:da7d
   
 ## Limitations and known bugs
   
+The current implementation only inspects a single field, to simplify the automatic derivation of the bpf code. If you want to monitor multiple fields, many instances of the tool must be run (mind that this is still largely untested). 
+  
 Extending the software to cover additional protocols (e.g., ICMP) requires modification of the bpf code. An additional function to parse the protocol header must be defined, together with the proper switch cases in the main function (<code>nw_stats</code>).
  
 Extending the software to cover option fields requires modification of the bpf code too. Parsing of IP options has not been implemented so far because dealing with variable fields is not trivial with eBPF, and it is likely that the resulting code exceeds the current limitations of the verifier.
