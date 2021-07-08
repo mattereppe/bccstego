@@ -31,8 +31,8 @@ class InvalidParameterError(Exception):
 # Parse parameters from the command line
 parser = argparse.ArgumentParser(description='Run bpf inspectors on IPv6 header.',
 		epilog='Beware to select the correct bin number!')
-parser.add_argument('-t','--type', choices=['fl','tc','hl','nh','pl','tos','ttl','ihl', 'id','fo'],
-        help='Type of statistics to collect. Allowed values for IPv6: fl (flow label), tc (traffic class), hl (hop limit), nh (next header), pl (payload length). Allowed valued for IPv4: tos (type of service), ttl (time-to-live), ihl (internet header length), id (identification), fo (fragment offset)',
+parser.add_argument('-t','--type', choices=['fl','tc','hl','nh','pl','tos','ttl','ihl', 'id','fo','ts','ack','res','chk'],
+        help='Type of statistics to collect. Allowed values for IPv6: fl (flow label), tc (traffic class), hl (hop limit), nh (next header), pl (payload length). Allowed valued for IPv4: tos (type of service), ttl (time-to-live), ihl (internet header length), id (identification), fo (fragment offset). Allowed values for TCP: ts (timestamp), ack (acknowledge number), res (reserved bits). Allowed values for UDP: chk (checksum)',
         metavar='PROG', required=True)
 parser.add_argument('-d','--dev', 
 		help='Network interface to attach the program to', required=True)
@@ -57,14 +57,20 @@ output_file_name=param.write
 
 ipv6_fields = {"fl", "tc", "hl", "nh", "pl"}
 ipv4_fields = {"tos", "ttl", "ihl", "id", "fo"}
+tcp_fields = {"ts","ack","res"}
+udp_fields = {"chk"}
 if prog == "fl":
     ipfieldlength=20
-elif prog == "pl" or prog == "id":
+elif prog == "pl" or prog == "id" or prog == "chk":
     ipfieldlength=16
 elif prog == "ihl":
     ipfieldlength=4
 elif prog == "fo":
     ipfieldlength=13
+elif prog == "ack" or prog == "ts":
+	ipfieldlength=32
+elif prog == "res":
+	ipfieldlength=4
 else:
     ipfieldlength=8
 
@@ -151,8 +157,23 @@ elif prog == 'id':
     """
 elif prog == 'fo':
     src = """
-        ipfield = iph4->ntohs(iph4->frag_off) & 0x1fff;
+        ipfield = ntohs(iph4->frag_off) & 0x1fff;
     """
+elif prog == 'ts':
+	src = """
+	"""
+elif prog == 'ack':
+	src = """
+		ipfield = ntohl(tcphdr->ack);
+	"""
+elif prog == 'res':
+	src = """
+		ipfield = tcphdr->res1;
+	"""
+elif prog == 'chk':
+	src = """
+		ipfield = ntohs(udphdr->checksum);
+	"""
 else:
     raise ValueErr("Invalid field name!")
 
@@ -163,6 +184,8 @@ if prog in ipv6_fields:
 elif prog in ipv4_fields:
     bpfprog = re.sub(r'UPDATE_STATISTICS_V6',"", bpfprog)
     bpfprog = re.sub(r'UPDATE_STATISTICS_V4',src, bpfprog)
+elif prog in tcp_fields || prog in udp_fields:
+	bpfprog = re.sub(r'UPDATE_STATISTICS_L4',src, bpfprog)
 else:
     raise ValueErr("Unmanaged field!!!")
 
@@ -178,7 +201,7 @@ else:
     ipr.tc("add-filter", "bpf", idx, ":1", fd=fn.fd, name=fn.name, 
             parent="ffff:fff3", classid=1, direct_action=True)
         
-hist = prog.get_table('ip_stats_map')
+hist = prog.get_table('nw_stats_map')
 
 try:
     prev_values = hist.items() # Read initial values, but do not print them

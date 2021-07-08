@@ -40,9 +40,9 @@ SETBINBASE
 /* TODO: Improve performance by using multiple per-cpu hash maps.
  */
 #ifdef __BCC__
-BPF_ARRAY(ip_stats_map, __u32, NBINS);
+BPF_ARRAY(nw_stats_map, __u32, NBINS);
 #else
-struct bpf_map_def SEC("maps") ip_stats_map = {
+struct bpf_map_def SEC("maps") nw_stats_map = {
 	.type = BPF_MAP_TYPE_ARRAY,
 	.key_size = sizeof(__u32),
 	.value_size = sizeof(__u32),
@@ -185,6 +185,60 @@ static __always_inline int parse_ip6hdr(struct hdr_cursor *nh,
 	return ip6h->nexthdr;
 }
 			
+/*
+ * parse_udphdr: parse the udp header and return the length of the udp payload
+ */
+static __always_inline int parse_udphdr(struct hdr_cursor *nh,
+					void *data_end,
+					struct udphdr **udphdr)
+{
+	int len;
+	struct udphdr *h = nh->pos;
+
+	if (h + 1 > data_end)
+		return -1;
+
+	nh->pos  = h + 1;
+	*udphdr = h;
+
+	len = bpf_ntohs(h->len) - sizeof(struct udphdr);
+	if (len < 0)
+		return -1;
+
+	return len;
+}
+
+
+/*
+ * parse_tcphdr: parse and return the length of the tcp header
+ */
+static __always_inline int parse_tcphdr(struct hdr_cursor *nh,
+					void *data_end,
+					struct tcphdr **tcphdr)
+{
+	int len;
+	struct tcphdr *h = nh->pos;
+
+	if (h + 1 > data_end)
+		return -1;
+
+	len = h->doff * 4;
+	// Sanity check packet field is valid 
+	if(len < sizeof(h))
+		return -1;
+
+	// Variable-length TCP header, need to use byte-based arithmetic 
+	if (nh->pos + len > data_end)
+		return -1;
+
+	nh->pos += len;
+	*tcphdr = h;
+
+	return data_end - nh->pos;
+}
+
+
+
 #ifdef __BCC__
 BCC_SEC("ip_stats")
 #else
@@ -208,6 +262,8 @@ int  ip_stats(struct __sk_buff *skb)
 	struct ethhdr *eth;
 	struct ipv6hdr* iph6;
 	struct iphdr *iph4;
+	struct tcphdr *tcphdr;
+	struct udphdr *udphdr;
 	__u64 ts, te;
 
 	ts = bpf_ktime_get_ns();	
@@ -240,6 +296,29 @@ int  ip_stats(struct __sk_buff *skb)
 		return TC_ACT_OK;
 	}	
 
+	switch (ip_proto) {
+	/*	case IPPROTO_ICMP:
+		case IPPROTO_ICMPV6:
+			if( process_icmp_header(&nh, data_end, &icmphdrc, &key) < 0 )
+				return TC_ACT_OK;
+			break;*/
+		case IPPROTO_TCP:
+			if( parse_tcphdr(&nh, data_end, &tcphdr) < 0 )
+				return TC_ACT_OK;
+			break;
+		case IPPROTO_UDP:
+			if( parse_udphdr(&nh, data_end, &udphdr) < 0 )
+				return TC_ACT_OK;
+			break;
+		default:
+			/* TODO: cound how many packets/bytes are seen from
+			 * unmanaged protocols, so we can understand the impact
+			 * of such traffic. 
+			 * Hints: a common line with IPPROTO_MAX may be used.
+			 */
+			return TC_ACT_OK;
+	}
+
 	/* Check statistics
 	 */
 	if ( vers == 6 ) {
@@ -252,21 +331,23 @@ int  ip_stats(struct __sk_buff *skb)
 			UPDATE_STATISTICS_V4
 		}
 	}
+
+	UPDATE_STATISTICS_L4
 			
 
 	/* Collect the required statistics. */
 	__u32 key = ipfield >> (IPFIELDLENGTH-BINBASE);
 	__u32 *counter = 
 #ifndef __BCC__
-		bpf_map_lookup_elem(&ip_stats_map, &key);
+		bpf_map_lookup_elem(&nw_stats_map, &key);
 #else
-		ip_stats_map.lookup(&key);
+		nw_stats_map.lookup(&key);
 #endif
 	if(!counter)
 #ifndef __BCC__
-		bpf_map_update_elem(&ip_stats_map, &key, &init_value, BPF_ANY);
+		bpf_map_update_elem(&nw_stats_map, &key, &init_value, BPF_ANY);
 #else
-		ip_stats_map.update(&key, &init_value);
+		nw_stats_map.update(&key, &init_value);
 #endif
 	else
 		__sync_fetch_and_add(counter, 1);
